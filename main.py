@@ -2,16 +2,8 @@ import argparse
 import os
 import json
 import re
-from collections import defaultdict
-from math import log
+
 import chardet
-
-import nltk
-from nltk.corpus import stopwords
-
-# Ensure NLTK stopwords are available
-nltk.download("stopwords")
-stop_words = set(stopwords.words("english"))
 
 
 def preprocess(text):
@@ -20,67 +12,28 @@ def preprocess(text):
     Return a list of words.
     """
     text = text.lower()
-    text = re.sub(r"[^\w\s]", "", text)  # Remove punctuation
-    words = [word for word in text.split() if word not in stop_words]
+    text = re.sub(r"\b\d+\b", "number", text)  # Normalize Numbers
+    text = re.sub(r"[^\w\s]", "", text)  # Remove Punctuation and Non-words
+    text = re.sub(r"\s+", " ", text).strip()  # Normalize Whitespace
+    words = [word for word in text.split()]  # Tokenize
     return words
 
 
-def create_vocab(data):
-    """
-    Generate the vocabulary from the dataset, compute
-    word counts per label, class_counts, and class_totals
-    """
-    vocab = set()
-    word_totals = defaultdict(lambda: defaultdict(int))
-    class_counts = defaultdict(int)  # Count of documents per class
-    class_totals = defaultdict(int)  # Total number of words per class
+def load_model_data(model_file="model_data.json"):
+    try:
+        # Open and load the JSON file
+        with open(model_file, "r") as f:
+            model_data = json.load(f)
 
-    for entry in data:
-        if not isinstance(entry, dict) or "text" not in entry or "label" not in entry:
-            print(f"Warning: Skipping invalid entry: {entry}")
-            continue
+        # Extract the relevant parts of the model data
+        class_probs = model_data.get("class_probs", {})
+        word_probs = model_data.get("word_probs", {})
+        vocab = model_data.get("vocab", [])
 
-        # Ensure 'text' is a list of tokens
-        if isinstance(entry["text"], list):
-            tokens = entry["text"]
-        else:
-            print(f"Warning: 'text' field is not a list in entry: {entry}")
-            continue
-
-        vocab.update(tokens)  # Add new words to the vocabulary
-
-        # Get the label and update counts
-        label = entry["label"]
-        class_counts[label] += 1  # Increment document count for the class
-        class_totals[label] += len(tokens)  # Increment word count for the class
-
-        for token in tokens:
-            word_totals[label][token] += (
-                1  # Increment word count for the token in the class
-            )
-
-    return sorted(vocab), word_totals, class_counts, class_totals
-
-
-def train_naive_bayes(word_totals, vocab, class_counts, class_totals):
-    """
-    Train a Naive Bayes model using the features and vocabulary.
-    """
-
-    class_probs = {
-        cls: log(count / sum(class_counts.values()))
-        for cls, count in class_counts.items()
-    }
-
-    word_probs = {
-        cls: {
-            word: log((word_totals[cls][word] + 1) / (class_totals[cls] + len(vocab)))
-            for word in vocab
-        }
-        for cls in class_counts
-    }
-
-    return class_probs, word_probs
+        return class_probs, word_probs, vocab
+    except Exception as e:
+        print(f"Error loading model data from {model_file}: {e}")
+        return None, None, None
 
 
 def predict(text, class_probs, word_probs, vocab):
@@ -112,78 +65,15 @@ def predict(text, class_probs, word_probs, vocab):
     )  # 'Unknown' if scores are somehow invalid
 
 
-def load_training_data(file_path):
+# Function to detect file encoding
+def detect_encoding(file_path):
     """
-    Load training data from a JSON file where each entry has:
-    - "text" as a list of tokens.
-    - "label" as a classification (e.g., "Spam" or "Ham").
+    Detect the encoding of a file using chardet.
     """
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)  # Load the JSON data
-        return data
-
-    except FileNotFoundError:
-        print(f"Error: File '{file_path}' not found.")
-    except json.JSONDecodeError as e:
-        print(f"Error: File '{file_path}' is not a valid JSON file. {e}")
-    except Exception as e:
-        print(f"Error reading training data: {e}")
-    return []
-
-
-def read_file(item_path):
-    try:
-        # First, try to detect encoding using chardet
-        with open(item_path, "rb") as f:
-            raw_data = f.read()
-            result = chardet.detect(raw_data)
-            encoding = result["encoding"]
-            confidence = result["confidence"]
-
-        #print(f"Detected encoding: {encoding} with confidence: {confidence}")
-
-        # Try reading the file with the detected encoding
-        with open(item_path, "r", encoding=encoding, errors="replace") as f:
-            data = f.read()
-        return data
-
-    except UnicodeDecodeError as e:
-        print(
-            f"UnicodeDecodeError detected for file '{item_path}' using detected encoding '{encoding}'. Trying fallback encodings."
-        )
-
-        # List of common fallbacks for Asian and Western encodings
-        fallback_encodings = [
-            "utf-8",
-            "gbk",
-            "gb2312",
-            "big5",
-            "shift_jis",
-            "iso2022_jp",
-            "latin1",
-            "cp1252",
-        ]
-
-        for enc in fallback_encodings:
-            try:
-                with open(item_path, "r", encoding=enc, errors="replace") as f:
-                    data = f.read()
-                #print(f"Successfully read file '{item_path}' using fallback encoding '{enc}'.")
-                return data
-            except UnicodeDecodeError:
-                print(
-                    f"Failed to read file '{item_path}' using fallback encoding '{enc}'."
-                )
-
-        # If all fallbacks fail, raise the original error
-        print(f"Failed to decode file '{item_path}' using any fallback encoding.")
-        raise e
-
-    except Exception as e:
-        # Catch any other errors that may occur
-        print(f"Error processing file '{item_path}': {e}")
-        raise e
+    with open(file_path, "rb") as f:
+        raw_data = f.read()  # Read the file as binary
+    result = chardet.detect(raw_data)  # Detect the encoding
+    return result["encoding"]
 
 
 def scan_folder(folder, output_file):
@@ -194,34 +84,7 @@ def scan_folder(folder, output_file):
         print(f"Error: Folder '{folder}' does not exist.")
         return
 
-    training_data = load_training_data("training_data.json")
-    if not training_data:
-        print("Error: No training data found. Cannot classify files.")
-        return
-    else:
-        print("Training data found.")
-
-    vocab, word_totals, class_counts, class_totals = create_vocab(training_data)
-    if not vocab or not word_totals:
-        print("Error: Vocabulary or word_totals are empty. Cannot train model.")
-        return
-    else:
-        print("Vocabulary and word_totals are not empty.")
-
-    if not class_counts or not class_totals:
-        print("Error: class_counts or class_totals are empty. Cannot train model.")
-        return
-    else:
-        print("class_counts and class_totals are not empty.")
-
-    class_probs, word_probs = train_naive_bayes(
-        word_totals, vocab, class_counts, class_totals
-    )
-    if not class_probs or not word_probs:
-        print("Error: class_probs or word_totals are empty. Cannot train model.")
-        return
-    else:
-        print("class_probs and word_totals are not empty.")
+    class_probs, word_probs, vocab = load_model_data("model_data.json")
 
     try:
         with open(output_file, "w", encoding="utf-8") as file:
@@ -230,19 +93,44 @@ def scan_folder(folder, output_file):
 
                 if os.path.isfile(item_path):
                     try:
-                        data = read_file(item_path)
+                        # Detect file encoding
+                        encoding = detect_encoding(item_path)
 
-                        if data.strip():  # Skip empty files
-                            prediction = predict(data, class_probs, word_probs, vocab)
-                            category = "inf" if prediction == "Spam" else "cln"
-                            file.write(f"{item}|{category}\n")
+                        # Try opening the file with the detected encoding
+                        try:
+                            with open(
+                                item_path, "r", encoding=encoding, errors="ignore"
+                            ) as f:
+                                data = f.read()
 
-                            print(f"File: {item}, Prediction: {prediction}")
+                                if data.strip():  # Skip empty files
+                                    prediction = predict(
+                                        data, class_probs, word_probs, vocab
+                                    )
+                                    category = "inf" if prediction == "Spam" else "cln"
+                                    file.write(f"{item}|{category}\n")
+
+                        except UnicodeDecodeError:
+                            # If the detected encoding fails, try opening with a fallback encoding (utf-8)
+                            print(
+                                f"Warning: Unicode decode error with {item_path}. Trying UTF-8 encoding."
+                            )
+                            with open(
+                                item_path, "r", encoding="utf-8", errors="ignore"
+                            ) as f:
+                                data = f.read()
+
+                                if data.strip():  # Skip empty files
+                                    prediction = predict(
+                                        data, class_probs, word_probs, vocab
+                                    )
+                                    category = "inf" if prediction == "Spam" else "cln"
+                                    file.write(f"{item}|{category}\n")
 
                     except Exception as e:
-                        print(f"Error processing file '{item}': {e}")
+                        print(f"Error processing file '{item_path}': {e}")
 
-        print(f"Classification results written to {output_file}.")
+            print(f"Classification results written to {output_file}.")
     except Exception as e:
         print(f"Error writing to {output_file}: {e}")
 

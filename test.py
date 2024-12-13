@@ -1,227 +1,171 @@
-import argparse
 import os
-import json
 import re
-from collections import defaultdict
-from math import log
 import chardet
+import numpy as np
+from collections import Counter
+from bs4 import BeautifulSoup
 
-import nltk
-from nltk.corpus import stopwords
+# Function to detect file encoding
+def detect_encoding(file_path):
+    with open(file_path, 'rb') as f:
+        raw_data = f.read()
+    result = chardet.detect(raw_data)
+    return result['encoding']
 
-# Ensure NLTK stopwords are available
-nltk.download("stopwords")
-stop_words = set(stopwords.words("english"))
-
-
-def preprocess(text):
-    """
-    Preprocess the text: lowercase, remove punctuation.
-    Return a list of words.
-    """
-    text = text.lower()
-    text = re.sub(r"[^\w\s]", "", text)  # Remove punctuation
-    words = [word for word in text.split() if word not in stop_words]
-    return words
-
-
-def create_vocab(data):
-    """
-    Generate the vocabulary from the dataset, compute 
-    word counts per label, class_counts, and class_totals
-    """
-    vocab = set()
-    word_totals = defaultdict(lambda: defaultdict(int))
-    class_counts = defaultdict(int)  # Count of documents per class
-    class_totals = defaultdict(int)  # Total number of words per class
-
-    for entry in data:
-        if not isinstance(entry, dict) or "text" not in entry or "label" not in entry:
-            print(f"Warning: Skipping invalid entry: {entry}")
+# Helper function to read and preprocess email files (non-recursive)
+def read_and_preprocess_non_recursive(folder):
+    # List all files in the directory (non-recursively)
+    files = [os.path.join(folder, f) for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
+    all_words = []
+    for file in files:
+        encoding = detect_encoding(file)  # Detect file encoding
+        try:
+            with open(file, 'r', encoding=encoding, errors='ignore') as f:
+                content = f.readlines()
+        except UnicodeDecodeError:
+            # If the detected encoding fails, try opening with a different encoding or using a fallback
+            with open(file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.readlines()
+        
+        if not content:
             continue
+        
+        # Extract subject (first line) and body (remaining lines)
+        subject = content[0].strip()
+        body = ''.join(content[1:]).strip()
+        
+        # Clean HTML content (if any)
+        body = clean_html(body)
+        
+        # Remove short words (1-2 chars)
+        body = re.sub(r'\b\w{1,2}\b', '', body)
+        
+        words = body.split()
+        all_words.extend(words)
+    return files, all_words
 
-        # Ensure 'text' is a list of tokens
-        if isinstance(entry["text"], list):
-            tokens = entry["text"]
-        else:
-            print(f"Warning: 'text' field is not a list in entry: {entry}")
+# Function to clean HTML content using BeautifulSoup
+def clean_html(html_content):
+    soup = BeautifulSoup(html_content, 'html.parser')
+    return soup.get_text()
+
+# Step 1: Build Dictionary (using the same approach as before)
+# Paths to your folders
+train_nonspam_folder = r"C:\Users\Io\Desktop\Lot1_\Lot1_\Lot1\Clean"
+train_spam_folder = r"C:\Users\Io\Desktop\Lot1_\Lot1_\Lot1\Spam"
+
+# Read and process non-spam and spam emails
+_, all_words_nonspam = read_and_preprocess_non_recursive(train_nonspam_folder)
+_, all_words_spam = read_and_preprocess_non_recursive(train_spam_folder)
+
+# Combine words from both folders
+all_words = all_words_nonspam + all_words_spam
+word_counts = Counter(all_words)
+
+# Select the top 2500 most frequent words
+dictionary = [word for word, _ in word_counts.most_common(2500)]
+
+# Save dictionary to file
+with open('dictionary.txt', 'w', encoding='utf-8') as f:
+    for idx, word in enumerate(dictionary, 1):
+        f.write(f"{idx}. {word}\n")
+
+# Helper function to build feature matrix and labels
+def build_features_and_labels(folder, dictionary, label_value, max_docs=None):
+    files, _ = read_and_preprocess_non_recursive(folder)
+    features = []
+    labels = []
+    for doc_id, file in enumerate(files, 1):
+        encoding = detect_encoding(file)
+        try:
+            with open(file, 'r', encoding=encoding, errors='ignore') as f:
+                content = f.readlines()
+        except UnicodeDecodeError:
+            with open(file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.readlines()
+        
+        if not content:
             continue
+        
+        # Extract subject and body as before
+        subject = content[0].strip()
+        body = ''.join(content[1:]).strip()
+        body = clean_html(body)
+        
+        word_counts = Counter(body.split())
+        for word, count in word_counts.items():
+            if word in dictionary:
+                word_id = dictionary.index(word) + 1
+                features.append([doc_id, word_id, count])
+        labels.append(label_value)
+        if max_docs and doc_id >= max_docs:
+            break
+    return features, labels
 
-        vocab.update(tokens)  # Add new words to the vocabulary
+# Build training features and labels
+features_nonspam, labels_nonspam = build_features_and_labels(train_nonspam_folder, dictionary, 0, max_docs=50)
+features_spam, labels_spam = build_features_and_labels(train_spam_folder, dictionary, 1, max_docs=50)
 
-        # Get the label and update counts
-        label = entry["label"]
-        class_counts[label] += 1  # Increment document count for the class
-        class_totals[label] += len(tokens)  # Increment word count for the class
+train_features = np.array(features_nonspam + features_spam)
+train_labels = np.array(labels_nonspam + labels_spam)
 
-        for token in tokens:
-            word_totals[label][token] += (
-                1  # Increment word count for the token in the class
-            )
+# Save to files
+np.savetxt('train-features.txt', train_features, fmt='%d', delimiter=' ')
+np.savetxt('train-labels.txt', train_labels, fmt='%d')
 
-    return sorted(vocab), word_totals, class_counts, class_totals
+# Step 2: Build test features and labels (you can update the test folder paths similarly)
+test_nonspam_folder = r"C:\Users\Io\Desktop\Lot1_\Lot1_\Lot1\Clean"
+test_spam_folder = r"C:\Users\Io\Desktop\Lot1_\Lot1_\Lot1\Spam"
 
+features_nonspam_test, labels_nonspam_test = build_features_and_labels(test_nonspam_folder, dictionary, 0)
+features_spam_test, labels_spam_test = build_features_and_labels(test_spam_folder, dictionary, 1)
 
-def train_naive_bayes(word_totals, vocab, class_counts, class_totals):
-    """
-    Train a Naive Bayes model using the features and vocabulary.
-    """
+test_features = np.array(features_nonspam_test + features_spam_test)
+test_labels = np.array(labels_nonspam_test + labels_spam_test)
 
-    class_probs = {
-        cls: log(count / sum(class_counts.values()))
-        for cls, count in class_counts.items()
-    }
+# Save to files
+np.savetxt('test-features.txt', test_features, fmt='%d', delimiter=' ')
+np.savetxt('test-labels.txt', test_labels, fmt='%d')
 
-    word_probs = {
-        cls: {
-            word: log((word_totals[cls][word] + 1) / (class_totals[cls] + len(vocab)))
-            for word in vocab
-        }
-        for cls in class_counts
-    }
+# Step 3: Train Naive Bayes Classifier (same as before)
+num_train_docs = 100
+num_tokens = 2500
 
-    return class_probs, word_probs
+# Load training data
+from scipy.sparse import coo_matrix
 
+train_matrix = coo_matrix((train_features[:, 2],
+                           (train_features[:, 0] - 1, train_features[:, 1] - 1)),
+                          shape=(num_train_docs, num_tokens)).toarray()
+train_labels = np.loadtxt('train-labels.txt', dtype=int)
 
-def predict(text, class_probs, word_probs, vocab):
-    """
-    Predict the class of a given text using the trained Naive Bayes model.
-    """
-    # Preprocess the input text 
-    tokens = preprocess(text)
+# Calculate word probabilities
+spam_indices = np.where(train_labels == 1)[0]
+nonspam_indices = np.where(train_labels == 0)[0]
 
-    # Initialize scores with class probabilities
-    scores = {cls: class_probs[cls] for cls in class_probs}
-    
-    # Iterate over the tokens and update the scores for each class
-    for cls in class_probs:
-        for word in tokens:
-            if word in vocab:  # Only process words in the vocabulary
-                # Add the word probability to the class score, using .get() to handle missing words
-                scores[cls] += word_probs[cls].get(
-                    word, 0
-                )  # Default to 0 if the word is missing in word_probs
+spam_wc = train_matrix[spam_indices].sum()
+nonspam_wc = train_matrix[nonspam_indices].sum()
 
-    # If scores is empty or has only one class, we return it directly
-    if not scores:
-        return "Score is empty"  # Return a default value or handle it as needed
+prob_token_spam = (train_matrix[spam_indices].sum(axis=0) + 1) / (spam_wc + num_tokens)
+prob_token_nonspam = (train_matrix[nonspam_indices].sum(axis=0) + 1) / (nonspam_wc + num_tokens)
 
-    # Find the class with the maximum score
-    return max(
-        scores, key=scores.get, default="Unknown"
-    )  # 'Unknown' if scores are somehow invalid
+# Step 4: Test Naive Bayes Classifier (same as before)
+test_matrix = coo_matrix((test_features[:, 2],
+                          (test_features[:, 0] - 1, test_features[:, 1] - 1)),
+                         shape=(len(test_labels), num_tokens)).toarray()
 
+# Probability of spam (prior)
+prob_spam = len(spam_indices) / num_train_docs
 
-def load_training_data(file_path):
-    """
-    Load training data from a JSON file where each entry has:
-    - "text" as a list of tokens.
-    - "label" as a classification (e.g., "Spam" or "Ham").
-    """
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)  # Load the JSON data
-        return data
+# Calculate log probabilities for each email
+log_prob_spam = test_matrix @ np.log(prob_token_spam) + np.log(prob_spam)
+log_prob_nonspam = test_matrix @ np.log(prob_token_nonspam) + np.log(1 - prob_spam)
 
-    except FileNotFoundError:
-        print(f"Error: File '{file_path}' not found.")
-    except json.JSONDecodeError as e:
-        print(f"Error: File '{file_path}' is not a valid JSON file. {e}")
-    except Exception as e:
-        print(f"Error reading training data: {e}")
-    return []
+# Make predictions
+predictions = log_prob_spam > log_prob_nonspam
 
+# Step 5: Evaluate Classifier
+wrong_classifications = np.sum(predictions != test_labels)
+error_rate = wrong_classifications / len(test_labels)
 
-def scan_folder(folder, output_file):
-    """
-    Scan a folder for email files and classify them as spam or ham.
-    """
-    if not os.path.exists(folder):
-        print(f"Error: Folder '{folder}' does not exist.")
-        return
-
-    training_data = load_training_data("training_data.json")
-    if not training_data:
-        print("Error: No training data found. Cannot classify files.")
-        return
-    else:
-        print("Training data found.")
-
-    vocab, word_totals, class_counts, class_totals = create_vocab(
-        training_data
-    )
-    if not vocab or not word_totals:
-        print("Error: Vocabulary or word_totals are empty. Cannot train model.")
-        return
-    else:
-        print("Vocabulary and word_totals are not empty.")
-
-    if not class_counts or not class_totals:
-        print("Error: class_counts or class_totals are empty. Cannot train model.")
-        return
-    else:
-        print("class_counts and class_totals are not empty.")
-
-    class_probs, word_probs = train_naive_bayes(
-        word_totals, vocab, class_counts, class_totals
-    )
-    if not class_probs or not word_probs:
-        print("Error: class_probs or word_totals are empty. Cannot train model.")
-        return
-    else:
-        print("class_probs and word_totals are not empty.")
-
-    try:
-        with open(output_file, "w", encoding="utf-8") as file:
-            for item in os.listdir(folder):
-                item_path = os.path.join(folder, item)
-
-                if os.path.isfile(item_path):
-                    try:
-                        # Detect the encoding of the file
-                        with open(
-                            item_path, "rb"
-                        ) as f:  # Open the file in binary mode for chardet
-                            raw_data = f.read()
-                            result = chardet.detect(raw_data)
-                            encoding = result["encoding"]  # Get the detected encoding
-
-                        # Open the file with the detected encoding
-                        with open(item_path, "r", encoding=encoding) as f:
-                            data = f.read()
-
-                            if data.strip():  # Skip empty files
-                                prediction = predict(
-                                    data, class_probs, word_probs, vocab
-                                )
-                                category = "inf" if prediction == "Spam" else "cln"
-                                file.write(f"{item}|{category}\n")
-
-                                print(f"File: {item}, Prediction: {prediction}")
-                    except Exception as e:
-                        print(f"Error processing file '{item}': {e}")
-
-        print(f"Classification results written to {output_file}.")
-    except Exception as e:
-        print(f"Error writing to {output_file}: {e}")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Anti-spam filter.")
-    parser.add_argument(
-        "-scan",
-        nargs=2,
-        metavar=("folder", "output_file"),
-        help="Scan the folder and classify files as spam or ham.",
-    )
-
-    args = parser.parse_args()
-
-    if args.scan:
-        scan_folder(args.scan[0], args.scan[1])
-    else:
-        parser.print_help()
-
-
-if __name__ == "__main__":
-    main()
+print(f"Error Rate: {error_rate:.4f}")

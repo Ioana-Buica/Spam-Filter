@@ -1,0 +1,1 @@
+py  training.py -scan C:\Users\Io\Desktop\Lot1_\Lot1_\Lot1
