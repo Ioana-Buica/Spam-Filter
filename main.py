@@ -1,8 +1,9 @@
 import argparse
 import os
-import json
 import re
 import chardet
+import pickle
+import gzip
 
 from bs4 import BeautifulSoup
 
@@ -37,22 +38,20 @@ def preprocess_email_body(email_body):
     return words
 
 
-def load_model_data(model_file="model_data.json"):
+def load_model_data(filename="model_data.pkl.gz"):
     """
-    Get the values for class_probs, word_probs, vocab from file "model_data.json".
+    Load the model data from a compressed file using pickle and gzip,
+    and return the 'class_probs', 'word_probs', and 'vocab'.
     """
     try:
-        with open(model_file, "r") as f:
-            model_data = json.load(f)
+        with gzip.open(filename, "rb") as f:
+            model_data = pickle.load(f)
 
-        class_probs = model_data.get("class_probs", {})
-        word_probs = model_data.get("word_probs", {})
-        vocab = model_data.get("vocab", [])
-
-        return class_probs, word_probs, vocab
+        # Return individual components
+        return model_data["class_probs"], model_data["word_probs"], model_data["vocab"]
 
     except Exception as e:
-        print(f"Error loading model data from {model_file}: {e}")
+        print(f"Error loading model data: {e}")
         return None, None, None
 
 
@@ -171,7 +170,7 @@ def scan_folder(folder, output_file):
         print(f"Error: Folder '{folder}' does not exist.")
         return
 
-    class_probs, word_probs, vocab = load_model_data("model_data.json")
+    class_probs, word_probs, vocab = load_model_data()
     process_folder_with_subfolder(folder, output_file, class_probs, word_probs, vocab)
     print(f"Classification results written to {output_file}.")
 
