@@ -10,11 +10,31 @@ from math import log
 
 from bs4 import BeautifulSoup
 
+from nltk.corpus import stopwords
+from langdetect import detect
+
+
+def detect_language(text):
+    try:
+        return detect(text)
+    except:
+        return "unknown"
+
+
+def get_stopwords_for_language(language_code):
+    try:
+        return set(stopwords.words(language_code))
+    except:
+        return (
+            set()
+        )  # Return an empty set if stopwords for the language are unavailable
+
 
 def detect_encoding(file_path):
     """
     Detect the encoding of a file using chardet.
     """
+
     with open(file_path, "rb") as f:
         raw_data = f.read()  # Read the file as binary
     result = chardet.detect(raw_data)  # Detect the encoding
@@ -22,30 +42,51 @@ def detect_encoding(file_path):
 
 
 def is_html(text):
+    """
+    Check if the text is html.
+    """
     soup = BeautifulSoup(text, "html.parser")
     return bool(soup.find())  # True if it finds HTML tags
 
 
 def preprocess_email_body(email_body):
+    """
+    Extract the words from email/file.
+    """
     if is_html(email_body):
-        # Parse HTML and extract text
-        # soup = BeautifulSoup(email_body, "html.parser")
-        # text = soup.get_text(separator=" ")
-        return []
+        # Parse the HTML content
+        soup = BeautifulSoup(email_body, "html.parser")
+
+        # Remove script and style elements
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+
+        # Extract text content from the HTML
+        text = soup.get_text(separator=" ")
 
     else:
         # Assume plain text
         text = email_body
 
-        # General text preprocessing
-        text = text.lower()  # Lowercase
-        text = re.sub(r"\b\d+\b", "number", text)  # Normalize Numbers
-        text = re.sub(r"[^\w\s]", "", text)  # Remove Punctuation and Non-words
-        text = re.sub(r"\s+", " ", text).strip()  # Normalize Whitespace
-        words = [word for word in text.split()]  # Tokenize
-        # stemmed_words = [stemmer.stem(word) for word in words]  # Apply Stemming
+    language_code = detect_language(text)  # Detect the language of the text
+    stop_words = get_stopwords_for_language(
+        language_code
+    )  # Get the stopwords for the detected language
 
-        return words
+    # General text preprocessing
+    text = text.lower()  # Lowercase
+    text = re.sub(r"\b\d+\b", "", text)  # Remove Numbers
+    text = re.sub(
+        r"[^\w\s]", "", text
+    )  # Remove all characters that are not alphanumeric
+    text = re.sub(r"\s+", " ", text).strip()  # Normalize Whitespace
+    words = [word for word in text.split()]  # Tokenize
+    # stemmed_words = [stemmer.stem(word) for word in words]  # Apply Stemming
+    words = [
+        word for word in words if word.lower() not in stop_words
+    ]  # Remove stop_words
+
+    return words
 
 
 def create_vocab(data):
@@ -108,13 +149,14 @@ def train_naive_bayes(word_totals, vocab, class_counts, class_totals):
 def scan_folder(folder):
     """
     Scan a folder for email files and preprocess them for spam/ham classification.
-    Save results in a JSON file.
+    Save results in a file.
     """
     if not os.path.exists(folder):
         print(f"Error: Folder '{folder}' does not exist.")
         return
 
     processed_data = []
+    # Iterate over folders in the folder
     for item in os.listdir(folder):
         item_path = os.path.join(folder, item)
 
@@ -182,7 +224,7 @@ def main():
         "-scan",
         nargs=1,
         metavar=("folder"),
-        help="Scan the folder, preprocess, and save as JSON.",
+        help="Scan the folder, preprocess the files, and create a file with vocab.",
     )
 
     args = parser.parse_args()

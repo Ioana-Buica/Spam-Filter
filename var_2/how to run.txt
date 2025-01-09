@@ -1,0 +1,4 @@
+py  var_2\main.py -scan C:\Users\Io\Desktop\Lot1_\Lot1_\Lot1 output
+py  var_2\main.py -info info.txt
+
+py  var_2\train_model.py

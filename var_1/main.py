@@ -29,12 +29,17 @@ def preprocess_email_body(email_body):
 
         # Extract text content from the HTML
         text = soup.get_text(separator=" ")
+    else:
+        # Assume plain text
+        text = email_body
 
-    text = email_body.lower()  # Convert to lowercase
-    # text = re.sub(r"\b\d+\b", "number", text)  # Normalize numbers
+    # General text preprocessing
+    text = text.lower()  # Lowercase
+    text = re.sub(r"\b\d+\b", "", text)  # Remove numbers
     text = re.sub(r"[^\w\s]", "", text)  # Remove punctuation
     text = re.sub(r"\s+", " ", text).strip()  # Normalize whitespace
     words = text.split()  # Tokenize text
+    
     return words
 
 
