@@ -20,17 +20,11 @@ def is_html(text):
 
 def preprocess_email_body(email_body):
     if is_html(email_body):
-        # Parse the HTML content
         soup = BeautifulSoup(email_body, "html.parser")
-
-        # Remove script and style elements
         for tag in soup(["script", "style"]):
             tag.decompose()
-
-        # Extract text content from the HTML
         text = soup.get_text(separator=" ")
     else:
-        # Assume plain text
         text = email_body
 
     # General text preprocessing
@@ -39,7 +33,7 @@ def preprocess_email_body(email_body):
     text = re.sub(r"[^\w\s]", "", text)  # Remove punctuation
     text = re.sub(r"\s+", " ", text).strip()  # Normalize whitespace
     words = text.split()  # Tokenize text
-    
+
     return words
 
 
@@ -119,11 +113,11 @@ def process_file(item_path, item, output_file, class_probs, word_probs, vocab):
             try:
                 with open(item_path, "r", encoding=encoding, errors="ignore") as f:
                     process_data(f.read(), item, file, class_probs, word_probs, vocab)
-                    
+
             except UnicodeDecodeError:
                 with open(item_path, "r", encoding="utf-8", errors="replace") as f:
                     process_data(f.read(), item, file, class_probs, word_probs, vocab)
-                    
+
         except FileNotFoundError:
             print(f"File not found: {item_path}")
         except PermissionError:
@@ -180,34 +174,8 @@ def scan_folder(folder, output_file):
     print(f"Classification results written to {output_file}.")
 
 
-def write_info(output_file):
-    """
-    Writes Project_name, Student_name, Alias_Student, Project_version in the output file.
-    """
-    try:
-        with open(output_file, "w") as f:
-            Project_name = "SSOS"
-            Student_name = "Buica Ioana-Alexandra"
-            Alias_Student = "IO"
-            Project_version = "1"
-
-            f.write(
-                f"Project name: {Project_name}\nStudent name: {Student_name}\nAlias Student: {Alias_Student}\nProject version: {Project_version}\n"
-            )
-
-        print(f"Information written to {output_file}.")
-    except Exception as e:
-        print(f"Error writing to {output_file}: {e}")
-
-
 def main():
     parser = argparse.ArgumentParser(description="Anti-spam filter.")
-    parser.add_argument(
-        "-info",
-        metavar="output_file",
-        type=str,
-        help="Write output file name where to be written: Project_name, Student_name, Alias_Student, Project_version.",
-    )
     parser.add_argument(
         "-scan",
         nargs=2,
@@ -217,9 +185,7 @@ def main():
 
     args = parser.parse_args()
 
-    if args.info:
-        write_info(args.info)
-    elif args.scan:
+    if args.scan:
         scan_folder(args.scan[0], args.scan[1])
     else:
         parser.print_help()
