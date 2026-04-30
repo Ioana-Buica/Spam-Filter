@@ -94,18 +94,6 @@ Where `<label>` is:
 - `inf` — spam
 - `cln` — clean
 
-## Dependencies
-
-The code uses the following Python libraries:
-
-- `beautifulsoup4`
-- `chardet`
-- `nltk`
-- `langdetect`
-- `scikit-learn`
-- `joblib`
-- `bs4`
-
 ## What This Project Demonstrates
 
 This repository showcases practical machine learning and natural language processing skills:
